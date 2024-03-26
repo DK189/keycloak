@@ -1,10 +1,14 @@
 package org.keycloak.admin.ui.rest;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
+
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.GET;
@@ -18,13 +22,11 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.jboss.logging.Logger;
 import org.keycloak.admin.ui.rest.model.BruteUser;
 import org.keycloak.common.util.Time;
-import org.keycloak.models.Constants;
-import org.keycloak.models.KeycloakSession;
-import org.keycloak.models.RealmModel;
-import org.keycloak.models.UserLoginFailureModel;
-import org.keycloak.models.UserModel;
+import org.keycloak.models.*;
 import org.keycloak.models.utils.ModelToRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
+import org.keycloak.services.managers.AppAuthManager;
+import org.keycloak.services.managers.AuthenticationManager;
 import org.keycloak.services.resources.admin.permissions.AdminPermissionEvaluator;
 import org.keycloak.services.resources.admin.permissions.UserPermissionEvaluator;
 import org.keycloak.utils.SearchQueryUtils;
@@ -145,7 +147,36 @@ public class BruteForceUsersResource {
         attributes.put(UserModel.INCLUDE_SERVICE_ACCOUNT, includeServiceAccounts.toString());
 
         if (!auth.users().canView()) {
-            Set<String> groupModels = auth.groups().getGroupsWithViewPermission();
+
+            /*
+             * DK189 Patched:
+             * Fix performance of load child users when stock code load all groups x permissions.
+            */
+            Set<String> groupModels = null;
+            
+            AuthenticationManager.AuthResult authResult = new AppAuthManager.BearerTokenAuthenticator(session)
+                .setRealm(realm)
+                .setConnection(session.getContext().getConnection())
+                .setHeaders(session.getContext().getRequestHeaders())
+                .authenticate();
+            
+            if (authResult != null) {
+                UserModel user = authResult.getUser();
+                groupModels = user.getGroupsStream()
+                    .filter(
+                        g ->
+                            auth.groups().canViewMembers(g)
+                            ||
+                            auth.groups().canManageMembers(g)
+                    )
+                    .map(GroupModel::getId)
+                    .collect(Collectors.toSet());
+            } else {
+                groupModels = auth.groups().getGroupsWithViewPermission();
+            }
+            /*
+             * DK189 Patched.
+            */
 
             if (!groupModels.isEmpty()) {
                 session.setAttribute(UserModel.GROUPS, groupModels);

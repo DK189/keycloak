@@ -1,0 +1,10 @@
+version: '3.4'
+
+services:
+  keycloak:
+    image: ghcr.io/dk189/keycloak:24.0
+    build:
+      context: ./quarkus/container/
+      dockerfile: Dockerfile
+      args:
+        - KEYCLOAK_DIST=keycloak-999.0.0-SNAPSHOT.tar.gz
